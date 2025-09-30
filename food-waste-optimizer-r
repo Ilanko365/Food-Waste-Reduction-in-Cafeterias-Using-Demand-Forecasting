@@ -1,0 +1,99 @@
+
+# =============================================
+# Food Waste Reduction in Cafeterias
+# Shiny Front-end for Forecast + Newsvendor Optimization
+# =============================================
+
+library(shiny)
+library(tidyverse)
+library(lubridate)
+library(forecast)
+library(randomForest)
+
+# ---- Source your backend function ----
+# Put your forecast_newsvendor definition here (from your backend code)
+
+# =============================================
+# UI
+# =============================================
+ui <- fluidPage(
+ 
+  titlePanel("🍽️ Cafeteria Food Waste Reduction Dashboard"),
+ 
+  sidebarLayout(
+    sidebarPanel(
+      fileInput("file", "Upload Cafeteria Sales CSV",
+                accept = c(".csv")),
+      numericInput("horizon", "Forecast horizon (days):", 14, min=7, max=60),
+      numericInput("cost_over", "Overage cost per unit:", 2, min=0),
+      numericInput("cost_under", "Underage cost per unit:", 8, min=0),
+      actionButton("run", "Run Forecast & Optimization"),
+      downloadButton("downloadData", "Download Forecast CSV")
+    ),
+   
+    mainPanel(
+      tabsetPanel(
+        tabPanel("Forecast Table", tableOutput("table")),
+        tabPanel("Chart", plotOutput("plot"))
+      )
+    )
+  )
+)
+
+# =============================================
+# SERVER
+# =============================================
+
+server <- function(input, output, session) {
+ 
+  results <- eventReactive(input$run, {
+    req(input$file)
+   
+    raw <- read_csv(input$file$datapath) %>%
+      mutate(date = as.Date(date, origin = "1970-01-01"))  # Fix date format
+   
+    res <- raw %>%
+      group_by(cafeteria, item) %>%
+      group_modify(~ forecast_newsvendor(
+        .x,
+        h=input$horizon,
+        cost_overage=input$cost_over,
+        cost_under=input$cost_under)) %>%
+      ungroup() %>%
+      arrange(date, cafeteria, item, Forecast) %>%
+      select(date, everything())  # Make date the first column
+   
+    return(res)
+  })
+ 
+ 
+ 
+  output$table <- renderTable({
+    head(results() %>%
+           mutate(date = format(date, "%Y-%m-%d")), 20)  # Format date for display
+  })
+ 
+  output$plot <- renderPlot({
+    req(results())
+    df <- results()
+    ggplot(df, aes(x=date)) +
+      geom_line(aes(y=Forecast, color="Forecast")) +
+      geom_line(aes(y=Optimal_Production, color="Optimal Production")) +
+      facet_wrap(~ cafeteria + item, scales="free_y") +
+      theme_minimal()
+  })
+ 
+  output$downloadData <- downloadHandler(
+    filename = function() {
+      paste0("forecast_newsvendor_", Sys.Date(), ".csv")
+    },
+    content = function(file) {
+      write_csv(results(), file)
+    }
+  )
+}
+
+# =============================================
+# Run the Shiny App
+# =============================================
+shinyApp(ui, server)
