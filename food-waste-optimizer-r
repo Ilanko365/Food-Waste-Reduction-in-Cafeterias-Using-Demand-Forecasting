@@ -11,6 +11,29 @@ library(randomForest)
 
 # ---- Source your backend function ----
 # Put your forecast_newsvendor definition here (from your backend code)
+forecast_newsvendor <- function(df, h, cost_overage, cost_under) {
+  # Ensure proper order
+  df <- df %>% arrange(date)
+  
+  # Pick demand column
+  series <- df$demand
+  
+  # Forecast demand
+  fit <- forecast::auto.arima(ts(series, frequency = 7))
+  fc <- forecast::forecast(fit, h = h)
+  forecasts <- as.numeric(fc$mean)
+  
+  # --- Newsvendor critical fractile logic ---
+  p <- cost_under / (cost_under + cost_overage)  # service level
+  optimal_q <- qnorm(p, mean = forecasts, sd = sd(series, na.rm = TRUE))
+  
+  tibble(
+    date = seq.Date(max(df$date) + 1, by = "day", length.out = h),
+    Forecast = forecasts,
+    Optimal_Production = pmax(round(optimal_q), 0)
+  )
+}
+
 
 # =============================================
 # UI
